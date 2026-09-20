@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Force Tremor Chart axes to be readable in Dark Mode */
+.dark .recharts-cartesian-axis-tick-value {
+  fill: #94a3b8 !important; 
+}
+
+/* 1. Make the glowing line thick and bright neon cyan */
+.recharts-area-curve {
+  stroke: #22d3ee !important; 
+  stroke-width: 3px !important;
+}
+
+/* 2. Make the area under the line a soft, visible cyan */
+.recharts-area-area {
+  fill: #06b6d4 !important;
+  fill-opacity: 0.2 !important;
+}
+
+/* 3. Make the X and Y axis text light grey and legible */
+.recharts-cartesian-axis-tick-value {
+  fill: #cbd5e1 !important; 
+  font-weight: 500;
+}
+
+/* 4. Make the background grid lines subtle but visible */
+.recharts-cartesian-grid-horizontal line, 
+.recharts-cartesian-grid-vertical line {
+  stroke: #334155 !important; 
+}
+
+
+/* FORCE TREMOR BAR & DONUT COLORS (Tailwind v4 Fix) */
+.fill-emerald-500 { fill: #10b981 !important; }
+.fill-rose-500 { fill: #f43f5e !important; }
+.fill-violet-500 { fill: #8b5cf6 !important; }
+.fill-indigo-500 { fill: #6366f1 !important; }
+.fill-cyan-500 { fill: #06b6d4 !important; }
+.fill-amber-500 { fill: #f59e0b !important; }
+
+/* Force Legend Dot Colors */
+.bg-emerald-500 { background-color: #10b981 !important; }
+.bg-rose-500 { background-color: #f43f5e !important; }
+.bg-violet-500 { background-color: #8b5cf6 !important; }
+.bg-indigo-500 { background-color: #6366f1 !important; }
+.bg-cyan-500 { background-color: #06b6d4 !important; }
+.bg-amber-500 { background-color: #f59e0b !important; }
+
+/* Force Legend Text Color */
+.text-tremor-content { color: #94a3b8 !important; }
+
