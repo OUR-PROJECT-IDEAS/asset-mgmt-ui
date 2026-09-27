@@ -1,23 +1,19 @@
-import { BigQuery } from "@google-cloud/bigquery";
 import { NextResponse } from "next/server";
-
-const bigquery = new BigQuery();
+import { runQuery } from "../lib/bigquery";
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const property = searchParams.get("property");
 
-    // Dynamic Resolution: Maps property strings directly to property_id via the dimension table.
-    // Explicit table scoping handles table ambiguity issues cleanly.
     const trendFilterClause =
       property && property !== "All Properties"
-        ? `WHERE c.property_id IN (SELECT DISTINCT property_id FROM \`asset-management-poc-493809.asset_mgmt_poc.dim_properties\` WHERE property_name = @property)`
+        ? `WHERE c.property_id IN (SELECT DISTINCT property_id FROM \`__PROJECT__.__DATASET__.dim_properties\` WHERE property_name = @property)`
         : `WHERE 1=1`;
 
     const baseFilterClause =
       property && property !== "All Properties"
-        ? `WHERE property_id IN (SELECT DISTINCT property_id FROM \`asset-management-poc-493809.asset_mgmt_poc.dim_properties\` WHERE property_name = @property)`
+        ? `WHERE property_id IN (SELECT DISTINCT property_id FROM \`__PROJECT__.__DATASET__.dim_properties\` WHERE property_name = @property)`
         : `WHERE 1=1`;
 
     // 1. Time-Series Trend Query with Embedded Audit Anomaly Detection Deltas
@@ -29,7 +25,7 @@ export async function GET(request) {
           SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as calc_revenue,
           SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END) as calc_opex,
           SUM(amount) as calc_cash_flow
-        FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_t12_entries\`
+        FROM \`__PROJECT__.__DATASET__.fact_t12_entries\`
         GROUP BY property_id, period_date
       ),
       ReportedMetrics AS (
@@ -43,7 +39,7 @@ export async function GET(request) {
             MAX(CASE WHEN UPPER(raw_total_label) IN ('NET OPERATING INCOME', 'NET OPERATING INCOME (LOSS)') THEN reported_amount END)
           ) as reported_net_cash_flow,
           MAX(CASE WHEN UPPER(raw_total_label) IN ('TOTAL OPERATING EXPENSES', 'TOTAL EXPENSE', 'TOTAL OPERATING EXPENSE') THEN reported_amount END) as reported_opex
-        FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_audit_totals\`
+        FROM \`__PROJECT__.__DATASET__.fact_audit_totals\`
         GROUP BY property_id, period_date
       )
       SELECT
@@ -75,7 +71,7 @@ export async function GET(request) {
           ELSE 'Administrative & Other'
         END as name,
         ABS(SUM(amount)) as value
-      FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_t12_entries\`
+      FROM \`__PROJECT__.__DATASET__.fact_t12_entries\`
       ${baseFilterClause} AND amount < 0
       GROUP BY name
     `;
@@ -89,11 +85,14 @@ export async function GET(request) {
         ABS(SUM(CASE WHEN REGEXP_CONTAINS(UPPER(raw_description), 'BAD DEBT|WRITE OFF') THEN amount ELSE 0 END)) as bad_debt,
         SUM(CASE WHEN REGEXP_CONTAINS(UPPER(raw_description), 'REIMB|BILL BACK|UTILITY INCOME') THEN amount ELSE 0 END) as rubs_collected,
         ABS(SUM(CASE WHEN REGEXP_CONTAINS(UPPER(raw_description), 'UTILITY|ELECTRIC|WATER|SEWER|GAS|TRASH') AND amount < 0 THEN amount ELSE 0 END)) as total_utility_expense
-      FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_t12_entries\`
+      FROM \`__PROJECT__.__DATASET__.fact_t12_entries\`
       ${baseFilterClause}
     `;
 
-    // 4. Cross-Portfolio Dynamic Leaderboard Query
+    const queryOptions = {
+      params: property ? { property } : {},
+    };
+
     let leaderboardRows = [];
     if (!property || property === "All Properties") {
       const leaderboardQuery = `
@@ -101,36 +100,22 @@ export async function GET(request) {
           SELECT
             property_id,
             SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as revenue
-          FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_t12_entries\`
+          FROM \`__PROJECT__.__DATASET__.fact_t12_entries\`
           GROUP BY property_id
         )
         SELECT
           p.property_name,
           r.revenue
         FROM CalculatedRevenue r
-        JOIN \`asset-management-poc-493809.asset_mgmt_poc.dim_properties\` p ON r.property_id = p.property_id
+        JOIN \`__PROJECT__.__DATASET__.dim_properties\` p ON r.property_id = p.property_id
         ORDER BY revenue DESC
       `;
-      [leaderboardRows] = await bigquery.query({ query: leaderboardQuery });
+      leaderboardRows = await runQuery(leaderboardQuery, queryOptions);
     }
 
-    // Execution Configurations
-    const queryOptions = {
-      params: property ? { property } : {},
-    };
-
-    const [trendRows] = await bigquery.query({
-      query: trendQuery,
-      ...queryOptions,
-    });
-    const [donutRows] = await bigquery.query({
-      query: donutQuery,
-      ...queryOptions,
-    });
-    const [summaryRows] = await bigquery.query({
-      query: summaryQuery,
-      ...queryOptions,
-    });
+    const trendRows = await runQuery(trendQuery, queryOptions);
+    const donutRows = await runQuery(donutQuery, queryOptions);
+    const summaryRows = await runQuery(summaryQuery, queryOptions);
 
     return NextResponse.json({
       trend: trendRows,

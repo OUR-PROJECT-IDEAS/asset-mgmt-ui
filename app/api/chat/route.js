@@ -10,10 +10,16 @@ export async function POST(request) {
     });
     const client = await auth.getClient();
 
-    const projectId = process.env.GCP_PROJECT_ID;
+    const projectId = process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT || "uat-test-dev";
     // Force lowercase to ensure case-sensitive cloud routing alignment
     const agentId = (process.env.BIGQUERY_DATA_AGENT_ID || "").toLowerCase();
     const location = process.env.GCP_LOCATION || "us";
+
+    if (!agentId) {
+      return NextResponse.json({
+        answer: "Chat Data Agent is not configured. Set BIGQUERY_DATA_AGENT_ID in your environment variables to enable conversational analytics."
+      });
+    }
 
     // Standard stateless regional endpoint mapping
     const url = `https://geminidataanalytics.googleapis.com/v1beta/projects/${projectId}/locations/${location}:chat`;

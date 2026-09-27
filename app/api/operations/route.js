@@ -1,7 +1,5 @@
-import { BigQuery } from "@google-cloud/bigquery";
 import { NextResponse } from "next/server";
-
-const bigquery = new BigQuery();
+import { runQuery } from "../lib/bigquery";
 
 export async function GET(request) {
   try {
@@ -14,14 +12,14 @@ export async function GET(request) {
         mrr.rent_roll_id,
         CAST(mrr.as_of_date AS STRING) as as_of_date,
         COALESCE(dp.property_name, mrr.property_id) as property_name
-      FROM \`asset-management-poc-493809.asset_mgmt_poc.meta_rent_rolls\` mrr
-      LEFT JOIN \`asset-management-poc-493809.asset_mgmt_poc.dim_properties\` dp
+      FROM \`__PROJECT__.__DATASET__.meta_rent_rolls\` mrr
+      LEFT JOIN \`__PROJECT__.__DATASET__.dim_properties\` dp
         ON mrr.property_id = dp.property_id
       ORDER BY as_of_date DESC, rent_roll_id DESC
     `;
 
-    const [metaRows] = await bigquery.query({ query: metaQuery });
-    const availableRolls = metaRows.map((r) => ({
+    const metaRows = await runQuery(metaQuery);
+    const availableRolls = (metaRows || []).map((r) => ({
       id: r.rent_roll_id,
       date: r.as_of_date,
       propertyName: r.property_name || `File: ${r.batch_id || "Unknown"}`,
@@ -40,9 +38,9 @@ export async function GET(request) {
           mrr.as_of_date, 
           mrr.batch_id, 
           COALESCE(dp.property_name, mrr.property_id) as property_name
-        FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_rent_roll_entries\` rre
-        JOIN \`asset-management-poc-493809.asset_mgmt_poc.meta_rent_rolls\` mrr ON rre.rent_roll_id = mrr.rent_roll_id
-        LEFT JOIN \`asset-management-poc-493809.asset_mgmt_poc.dim_properties\` dp ON mrr.property_id = dp.property_id
+        FROM \`__PROJECT__.__DATASET__.fact_rent_roll_entries\` rre
+        JOIN \`__PROJECT__.__DATASET__.meta_rent_rolls\` mrr ON rre.rent_roll_id = mrr.rent_roll_id
+        LEFT JOIN \`__PROJECT__.__DATASET__.dim_properties\` dp ON mrr.property_id = dp.property_id
         WHERE rre.is_audit_row = FALSE
           AND rre.unit_number IS NOT NULL
           AND rre.unit_number != ''
@@ -62,7 +60,7 @@ export async function GET(request) {
           MAX(CASE WHEN rre.raw_column_name = 'Balance' THEN SAFE_CAST(rre.cell_value AS NUMERIC) END) as balance,
           MAX(CASE WHEN rre.raw_column_name = 'Move-In Date' THEN rre.cell_value END) as move_in,
           MAX(CASE WHEN rre.raw_column_name = 'Lease End' THEN rre.cell_value END) as lease_end
-        FROM \`asset-management-poc-493809.asset_mgmt_poc.fact_rent_roll_entries\` rre
+        FROM \`__PROJECT__.__DATASET__.fact_rent_roll_entries\` rre
         JOIN LatestValidRentRoll lv ON rre.rent_roll_id = lv.rent_roll_id
         WHERE rre.is_audit_row = FALSE AND rre.unit_number IS NOT NULL AND rre.unit_number != ''
         GROUP BY rre.unit_number
@@ -73,7 +71,7 @@ export async function GET(request) {
       ORDER BY pd.unit ASC;
     `;
 
-    const [rows] = await bigquery.query({ query });
+    const rows = await runQuery(query);
 
     if (!rows || rows.length === 0) {
       return NextResponse.json({ meta: { hasData: false, availableRolls } });
@@ -109,7 +107,6 @@ export async function GET(request) {
       const resName = (row.resident_name || "").toString().trim().toLowerCase();
       const uStatus = (row.unit_status || "").toString().trim().toLowerCase();
 
-      // Categorization Logic
       const isNonRev =
         uStatus.includes("down") ||
         uStatus.includes("model") ||
@@ -123,19 +120,17 @@ export async function GET(request) {
         !uStatus.includes("vacant");
 
       totalActualRent += rent;
-      totalMarketRent += mktRent > 0 ? mktRent : rent; // Fallback if market rent missing
+      totalMarketRent += mktRent > 0 ? mktRent : rent;
       totalBalance += bal;
 
       if (isNonRev) nonRevCount++;
       else if (isOccupied) trueOccupiedCount++;
 
-      // Unit Mix
       if (!unitMixMap[uType])
         unitMixMap[uType] = { name: uType, count: 0, totalRent: 0 };
       unitMixMap[uType].count++;
       unitMixMap[uType].totalRent += rent;
 
-      // Dates processing
       let moveInRaw = row.move_in?.value || row.move_in;
       if (isOccupied && moveInRaw) {
         const d = new Date(moveInRaw);
@@ -153,7 +148,7 @@ export async function GET(request) {
         );
 
         if (daysUntilExpiry < 0)
-          mtmCount++; // Month-to-Month exposure
+          mtmCount++;
         else if (daysUntilExpiry <= 30) {
           expirationsMap["0-30 Days"].units++;
           expirationsMap["0-30 Days"].rentAtRisk += rent;
@@ -188,7 +183,6 @@ export async function GET(request) {
       totalMarketRent > 0 ? (totalActualRent / totalMarketRent) * 100 : 0;
     const lossToLease = totalMarketRent - totalActualRent;
 
-    // Formatting outputs
     const unitMix = Object.values(unitMixMap).map((u) => ({
       name: u.name,
       units: u.count,
